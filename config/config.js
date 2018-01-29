@@ -15,6 +15,8 @@
  *
  */
 const yn = require('yn');
+const util = require('util');
+const path = require('path');
 const debug = require('debug')('muncher:config');
 
 var c = {};
@@ -25,9 +27,9 @@ c.oauth = {};
 var env = process.env;
 
 debug('Configuring loader with environment variables %s', Object
-.keys(env)
-.filter(k => k.startsWith("MUNCHER"))
-.map(k => { return k + "=" + env[k]; })
+  .keys(env)
+  .filter(k => k.startsWith("MUNCHER"))
+  .map(k => { return k + "=" + env[k]; })
 );
 
 // Information about muncher
@@ -49,9 +51,9 @@ if (c.mongo.location[c.mongo.location.length - 1] !== '/') {
 
 // fs paths
 c.fs.base = env.MUNCHER_BASEPATH || '/tmp/o2r/';
-c.fs.incoming = c.fs.base + 'incoming/';
-c.fs.compendium = c.fs.base + 'compendium/';
-c.fs.job = c.fs.base + 'job/';
+c.fs.incoming = path.join(c.fs.base, 'incoming');
+c.fs.compendium = path.join(c.fs.base, 'compendium');
+c.fs.job = path.join(c.fs.base, 'job');
 c.fs.delete_inc = true;
 c.fs.fail_on_no_files = yn(env.MUNCHER_FAIL_ON_NO_FILES) || false;
 
@@ -89,7 +91,9 @@ c.bagtainer.spec_version.default = '1';
 c.bagtainer.configFile = 'erc.yml';
 c.bagtainer.mountLocationInContainer = '/erc';
 c.bagtainer.keepContainers = false; // set this to true for debugging runtime options
-c.bagtainer.keepImages = true; // required for image download!
+c.bagtainer.keepImages = true;
+c.bagtainer.saveImageTarball = true;
+c.bagtainer.imageTarballFile = 'image.tar';
 c.bagtainer.validateBagBeforeExecute = true; // bag validation will fail, gut useful to highlight the changes in compendium
 c.bagtainer.validateCompendiumBeforeExecute = true;
 c.bagtainer.failOnValidationError = true;
@@ -108,16 +112,17 @@ c.bagit.stepResultAfterValidationError = 'skipped'; // it's not really a failure
 c.bagtainer.imageNamePrefix = 'erc:';
 c.bagtainer.forceImageRemoval = true;
 c.bagtainer.docker = {};
-// See https://docs.docker.com/engine/reference/commandline/create/ and https://docs.docker.com/engine/reference/api/docker_remote_api_v1.24/#create-a-container
+// See https://docs.docker.com/engine/api/v1.29/#operation/ContainerCreate
 c.bagtainer.docker.create_options = {
   CpuShares: 256,
   Env: ['O2R_MUNCHER=true'],
   Memory: 1073741824, // 1G
   MemorySwap: 2147483648, // double of 1G
-  NetworkMode: 'none',
-  User: '1000', // user name depends on image, use id to be save
-  Rm: !c.bagtainer.keepContainers
+  NetworkDisabled : true,
+  User: env.MUNCHER_CONTAINER_USER || '1000' // user name depends on image, use id to be save
 };
+c.bagtainer.rm = yn(env.EXECUTE_CONTAINER_RM) || true;
+
 // https://docs.docker.com/engine/reference/api/docker_remote_api_v1.24/#start-a-container
 c.bagtainer.docker.start_options = {
 };
@@ -151,7 +156,7 @@ c.meta = {};
 c.meta.dir = '.erc';
 c.meta.prettyPrint = {};
 c.meta.prettyPrint.indent = 4;
-c.meta.normativeFile = 'metadata_o2r.json';
+c.meta.normativeFile = 'metadata_o2r_1.json';
 c.meta.container = {};
 c.meta.container.image = env.MUNCHER_META_TOOL_CONTAINER || 'o2rproject/o2r-meta:latest';
 c.meta.container.default_create_options = {
@@ -161,27 +166,27 @@ c.meta.container.default_create_options = {
   MemorySwap: 2147483648, // double of 1G
   User: env.MUNCHER_META_TOOL_CONTAINER_USER || 'o2r' // or '1000', could be left away because of USER o2r command in o2r-meta's Dockerfile, but better safe than sorry.
 };
-c.meta.container.rm = yn(env.MUNCHER_META_TOOL_CONTAINER_RM) || false;
+c.meta.container.rm = yn(env.MUNCHER_META_TOOL_CONTAINER_RM) || true;
 
 c.meta.broker = {};
 c.meta.broker.module = 'broker';
-c.meta.broker.mappings = { 
+c.meta.broker.mappings = {
   zenodo: {
     targetElement: 'zenodo.metadata',
-    file: 'metadata_zenodo.json',
+    file: 'metadata_zenodo_1.json',
     mappingFile: 'broker/mappings/zenodo-map.json'
   },
   zenodo_sandbox: {
     targetElement: 'zenodo_sandbox.metadata',
-    file: 'metadata_zenodo_sandbox.json',
+    file: 'metadata_zenodo_sandbox_1.json',
     mappingFile: 'broker/mappings/zenodo_sandbox-map.json'
   },
   //o2r: {
   //  targetElement: 'o2r',
-  //  file: 'metadata_o2r.json',
+  //  file: 'metadata_o2r_1.json',
   //  mappingFile: 'broker/mappings/o2r-map.json'
   //} 
-}; 
+};
 c.meta.doiPath = 'metadata.o2r.identifier.doi';
 
 c.checker = {};
@@ -191,22 +196,24 @@ c.containerit = {};
 c.containerit.image = env.MUNCHER_CONTAINERIT_IMAGE || 'o2rproject/containerit:geospatial';
 c.containerit.default_create_options = {
   CpuShares: 256,
-  Env: ['O2R_MUNCHER=true'],
+  Env: ['O2R_MUNCHER=true', 'O2R_MUNCHER_VERSION=' + c.version],
   Memory: 1073741824 * 2, // 2G
   MemorySwap: 1073741824 * 4,
-  User: env.MUNCHER_CONTAINERIT_USER || 'rstudio', // IMPORTANT: this must fit the used image!
-  AutoRemove: true
+  User: env.MUNCHER_CONTAINERIT_USER || 'rstudio' // IMPORTANT: this must fit the used image!
 };
-c.containerit.baseImage = 'rocker/r-ver:3.4.2';
+c.containerit.baseImage = 'rocker/r-ver:3.4.3';
 c.containerit.maintainer = 'o2r';
+c.containerit.rm = yn(env.MUNCHER_CONTAINERIT_CONTAINER_RM) || true;
 
 c.payload = {};
 c.payload.tarball = {};
-c.payload.tarball.tmpdir = c.fs.base + 'payloads/';
+c.payload.tarball.tmpdir = path.join(c.fs.base, 'payloads');
 c.payload.tarball.statConcurrency = 4; // concurrency when creating payload tarballs
 c.payload.tarball.gzip = false;
 c.payload.tarball.gzipOptions = {};
+c.payload.tarball.globPattern = '**/*';
+c.payload.tarball.ignore = [c.bagtainer.imageTarballFile, c.meta.dir + '/**'];
 
-debug('CONFIGURATION:\n%s', JSON.stringify(c));
+debug('CONFIGURATION:\n%s', util.inspect(c, { depth: null, colors: true }));
 
 module.exports = c;
