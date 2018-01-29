@@ -46,7 +46,7 @@ var dbOptions = {
 mongoose.connection.on('error', (err) => {
   debug('Could not connect to MongoDB @ %s: %s'.yellow, dbURI, err);
 });
-// If the Node process ends, close the Mongoose connection 
+// If the Node process ends, close the Mongoose connection
 process.on('SIGINT', function () {
   mongoose.connection.close(function () {
     debug('Mongoose default connection disconnected through app termination signal (SIGINT)');
@@ -62,7 +62,7 @@ const multer = require('multer');
 const upload = multer();
 const app = express();
 app.use(compression());
-app.use(bodyParser.json());
+app.use(bodyParser.json({limit:'50000000'}));
 
 // passport & session modules for authenticating users.
 const User = require('./lib/model/user');
